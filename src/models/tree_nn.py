@@ -12,10 +12,12 @@ class TreeNode:
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
         ##? parameters for a 2-layer neural network
-        self.W1 = np.random.randn(in_dim,hidden_dim) * np.sqrt(1/in_dim) #kaiming
+        self.W1 = np.random.randn(in_dim,hidden_dim) * np.sqrt(2.0/in_dim) #kaiming
         self.b1 = np.zeros(hidden_dim)
-        self.W2 = np.random.randn(hidden_dim,1) * np.sqrt(1/hidden_dim)
-        self.b2 = np.zeros(1)
+        self.W2 = np.random.randn(hidden_dim,self.hidden_dim) * np.sqrt(2.0/hidden_dim)
+        self.b2 = np.zeros(hidden_dim)
+        self.W3 = np.random.randn(hidden_dim,1) * np.sqrt(2.0/hidden_dim)
+        self.b3 = np.zeros(1)
         ##
         self.childA = childA
         self.childB = childB
@@ -29,28 +31,38 @@ class TreeNode:
         self.mb1 = np.zeros_like(self.b1)
         self.mW2 = np.zeros_like(self.W2)
         self.mb2 = np.zeros_like(self.b2)
+        self.mW3 = np.zeros_like(self.W3)
+        self.mb3 = np.zeros_like(self.b3)
 
         self.vW1 = np.zeros_like(self.W1)
         self.vb1 = np.zeros_like(self.b1)
         self.vW2 = np.zeros_like(self.W2)
         self.vb2 = np.zeros_like(self.b2)
+        self.vW3 = np.zeros_like(self.W3)
+        self.vb3 = np.zeros_like(self.b3)
 
     def _forward(self,X):
         def relu(x):
             return np.maximum(0.0,x)
         self.z1 = X@self.W1 + self.b1
-        self.h = relu(self.z1)
-        self.z2 = self.h@self.W2 + self.b2
-        return self.z2.ravel()
+        self.h1 = relu(self.z1)
+        self.z2 = self.h1@self.W2 + self.b2
+        self.h2 = relu(self.z2)
+        self.out = self.h2@self.W3 + self.b3
+        return self.out.ravel()
 
     def _backward(self,p,X,y):
         #?? BCE loss 2-layer neural network
-        dz2 = (p-y).reshape(-1,1)
-        dz2 /= len(X)
-        self.dW2 = self.h.T@dz2
+        dout = (p-y).reshape(-1,1) / X.shape[0] #?? error at the output layer
+        self.dW3 = self.h2.T@dout
+        self.db3 = np.sum(dout,axis=0)
+        dh2 = dout@self.W3.T
+        dz2 = dh2*(self.z2>0)
+        self.dW2 = self.h1.T@dz2
         self.db2 = np.sum(dz2,axis=0)
-        dh = dz2@self.W2.T
-        dz1 = dh * (self.z1 > 0)
+        # assert False, f'{dz2.shape} {self.W2.shape}'
+        dh1 = dz2@self.W2.T
+        dz1 = dh1*(self.z1>0)
         self.dW1 = X.T @ dz1
         self.db1 = np.sum(dz1,axis=0)
 
@@ -60,7 +72,7 @@ class TreeNode:
         # self.b1 -= lr*self.db1
         # self.b2 -= lr*self.db2
         self.t += 1
-        params = ("W1", "b1", "W2", "b2")
+        params = ("W1", "b1", "W2", "b2",'W3','b3')
         for name in params:
             param = getattr(self, name)
             grad = getattr(self, "d" + name)
@@ -104,7 +116,7 @@ class MultiClassTreeNN:
         self.hidden_dim = hidden_dim
         self.shared_hidden_dim = shared_hidden_dim
         self.shared_feature_dim = shared_feature_dim
-        self.parents = [None]*num_classes
+        self.parents:list[TreeNode] = [None]*num_classes
         self.lr = lr; self.epochs = epochs; self.batch_size = batch_size
         self.shared_epochs = shared_epochs
         self.dataset = dataset
@@ -236,16 +248,17 @@ class MultiClassTreeNN:
         return scores
 
     def loss(self,X,y):
+        y_ovr = np.eye(self.num_classes)[y.astype(int)]
         scores = self.predict_scores(X)
         #?/ for binary classification (i'll just do it for now)
-        scores = scores[:,1]
-        loss = np.mean(np.mean(np.maximum(0.0,scores)-scores*y+np.log1p(np.exp(-np.abs(scores)))))
+        # scores = scores[:,1]
+        loss = np.mean(np.maximum(0.0,scores)-scores*y_ovr+np.log1p(np.exp(-np.abs(scores))))
         return loss
 
     def predict(self,X):
         scores = self.predict_scores(X)
-        if self.num_classes==2:
-            return (scores[:,1] >= 0).astype(float)
+        # if self.num_classes==2:
+        #     return (scores[:,1] >= 0).astype(float)
         #: scores = logits
         return np.argmax(scores,axis=1)
         
